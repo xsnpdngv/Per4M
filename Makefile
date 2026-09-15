@@ -45,7 +45,7 @@ GPROF_OPTS = \
 
 DOT_OPTS = \
     -Tpdf \
-    -Glabel="$(NAME) cpu profile $(DATE)" \
+    -Glabel="$(NAME) $(DATE)" \
     -Gfontsize=24 \
     -Glabelloc=top 
 
@@ -78,6 +78,7 @@ $(PERF_SCRIPT_FLT): $(PERF_SCRIPT)
 	( sed 's/@plt//g' \
 	| grep -v ' __libc_start_main\+' \
 	| grep -v ' _start\+' \
+	| grep -v ' main\+' \
 	) < $< > $@
 
 
@@ -99,7 +100,7 @@ fg flamegraph: $(FLAME_SVG)
 $(FLAME_SVG): $(PERF_SCRIPT_FLT)
 	( $(FLAMEGRAPH_DIR)/stackcollapse-perf.pl \
 	| $(FLAMEGRAPH_DIR)/flamegraph.pl \
-	    --title "$(NAME) cpu profile $(DATE)" \
+	    --title "$(NAME) $(DATE)" \
 	    --subtitle "$(SUB)" \
 	) < $< > $@
 
