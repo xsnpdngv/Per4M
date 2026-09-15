@@ -160,3 +160,128 @@ cd git/per4m
 make
 ```
 
+
+Makefile Targets and Variables
+------------------------------
+
+The Makefile expects to find either `perf.data` or a pre-generated
+`perf.script` in the current directory. The intermediate
+`perf.script.flt` filters out common noise (`@plt` stubs,
+`__libc_start_main`, `_start`, `main`).
+
+Targets:
+
+- `all` (default) — build both the call graph and the flamegraph.
+- `cg`, `callgraph` — build `$(NAME)_callgraph_YYYY-MM-DD.pdf` (via `.dot`).
+- `fg`, `flamegraph` — build `$(NAME)_flamegraph_YYYY-MM-DD.svg`.
+- `doc` — render `README.md` to `Per4M_v1.0.pdf` (requires `pandoc` +
+  XeLaTeX + the `Ubuntu Mono` font; not installed in the Docker image).
+- `clean` — remove generated `*.doc`, `*.flt`, `*.svg`, `*.dot`, `*.pdf`.
+- `rebuild` — `clean` followed by `all`.
+
+Variables (override on the `make` command line or via the environment):
+
+| Variable                   | Default                    | Purpose                                                   |
+| -------------------------- | -------------------------- | --------------------------------------------------------- |
+| `NAME`                     | `perf`                     | Prefix used for the output file names.                    |
+| `SUB`                      | *(empty)*                  | Flamegraph subtitle.                                      |
+| `FLAMEGRAPH_DIR`           | `$(HOME)/git/FlameGraph`   | Path to a `brendangregg/FlameGraph` checkout.             |
+| `CALLGRAPH_NODE_THRES_PCT` | `0.5`                      | `gprof2dot` node prune threshold (percent).               |
+| `CALLGRAPH_EDGE_THRES_PCT` | `0.1`                      | `gprof2dot` edge prune threshold (percent).               |
+| `CALLGRAPH_THEME_SKEW`     | `0.05`                     | `gprof2dot` color skew (< 1 emphasizes lower percentages).|
+
+
+Docker Wrapper
+==============
+
+For hosts that don't have `perf`, `gprof2dot`, `graphviz` or FlameGraph
+installed — or for reproducibility — the repository ships a
+[`Dockerfile`](Dockerfile) and a driver script
+[`per4m.sh`](per4m.sh) that bundle everything into a throwaway
+container.
+
+What is in the image
+--------------------
+
+Based on `debian:bookworm-slim`, the image includes:
+
+- `linux-perf` — reads/decodes `perf.data` (`perf script`).
+- `gprof2dot`, `graphviz` (`dot`), `perl` — turn `perf.script` into
+  callgraphs.
+- A shallow clone of
+  [`brendangregg/FlameGraph`](https://github.com/brendangregg/FlameGraph)
+  at `/opt/FlameGraph`.
+- The Per4M `Makefile` at `/opt/per4m/Makefile`.
+- `make`, `python3`, `git`, `sed`, `grep`, `less`, `bash`.
+
+The `doc` target's dependencies (`pandoc`, `texlive-xetex`,
+`fonts-ubuntu`) are intentionally **not** installed to keep the image
+small. Add them to the Dockerfile if you need `make doc`.
+
+Requirements on the host
+------------------------
+
+- Docker (or a compatible engine exposing the `docker` CLI).
+- The kernel version does not have to match the host that recorded
+  `perf.data` — `perf script` only decodes the file.
+
+Building the image
+------------------
+
+```bash
+./per4m.sh build          # explicit build
+# or just run any command; the script auto-builds on first use.
+```
+
+The tag defaults to `per4m:latest`; override with `PER4M_IMAGE=my/tag`.
+
+Running the pipeline
+--------------------
+
+`per4m.sh` mounts the current directory into `/work` inside a
+disposable (`--rm`) container and forwards its arguments to `make`
+against the baked-in Makefile. Files are written back to the host under
+your own UID/GID, so nothing ends up root-owned.
+
+```bash
+cd /path/with/perf.data          # or perf.script
+/path/to/Per4M/per4m.sh all NAME=my_program SUB="run 1"
+/path/to/Per4M/per4m.sh cg  NAME=my_program
+/path/to/Per4M/per4m.sh fg  NAME=my_program SUB="hot path"
+/path/to/Per4M/per4m.sh clean
+```
+
+Any `make` variable can be passed the same way, e.g.
+`CALLGRAPH_NODE_THRES_PCT=1.0`. Symlinking `per4m.sh` into a directory
+on `PATH` is convenient.
+
+Interactive shell
+-----------------
+
+To poke around manually (browse `perf.data`, inspect intermediates,
+run individual pipeline stages):
+
+```bash
+./per4m.sh shell
+# inside the container:
+make -f /opt/per4m/Makefile cg NAME=my_program
+perf script | less
+```
+
+The container is removed as soon as you `exit`.
+
+Script usage
+------------
+
+```
+Usage: per4m.sh COMMAND [ARGS...]
+
+Commands:
+  build              Build the Docker image.
+  shell              Interactive bash; CWD mounted at /work.
+  <make-target> ...  Run 'make <target> ARGS...' inside the container.
+
+Environment:
+  PER4M_IMAGE        Override docker image tag (default: per4m:latest).
+```
+
