@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Driver for the Per4M container.
 #
-# Builds the image on demand, mounts the caller's current directory into
-# /work inside a throwaway container (--rm) and either runs `make` with
-# the Per4M Makefile or drops the user into an interactive shell.
+# perf runs on the host: this script converts perf.data into perf.script
+# locally, then builds the image on demand, mounts the caller's current
+# directory into /work inside a throwaway container (--rm) and either runs
+# `make` with the Per4M Makefile or drops the user into an interactive shell.
 
 set -euo pipefail
 
@@ -11,10 +12,17 @@ IMAGE_NAME="${PER4M_IMAGE:-per4m:latest}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER_MAKEFILE="/opt/per4m/Makefile"
 CONTAINER_FLAMEGRAPH_DIR="/opt/FlameGraph"
+PERF_DATA="${PERF_DATA:-perf.data}"
+PERF_SCRIPT="${PERF_SCRIPT:-perf.script}"
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") COMMAND [ARGS...]
+
+Record on the host first, then let Per4M do the rest:
+
+  perf record --call-graph lbr <command>
+  $(basename "$0") all NAME="<command>"
 
 Commands:
   build              Build the Docker image (${IMAGE_NAME}).
@@ -36,7 +44,27 @@ Examples:
 
 Environment:
   PER4M_IMAGE   Override docker image tag (default: per4m:latest).
+  PERF_DATA     Perf recording to convert (default: perf.data).
+  PERF_SCRIPT   Text dump handed to the container (default: perf.script).
 EOF
+}
+
+# perf lives on the host only: turn PERF_DATA into PERF_SCRIPT if needed.
+ensure_perf_script() {
+    if [[ -f "${PERF_DATA}" ]]; then
+        if [[ ! -f "${PERF_SCRIPT}" || "${PERF_DATA}" -nt "${PERF_SCRIPT}" ]]; then
+            if ! command -v perf >/dev/null 2>&1; then
+                echo "perf not found on the host; cannot convert ${PERF_DATA}." >&2
+                exit 1
+            fi
+            echo "Generating ${PERF_SCRIPT} from ${PERF_DATA}..." >&2
+            perf script -i "${PERF_DATA}" > "${PERF_SCRIPT}"
+        fi
+    elif [[ ! -f "${PERF_SCRIPT}" ]]; then
+        echo "Neither ${PERF_DATA} nor ${PERF_SCRIPT} exist." >&2
+        echo "Record first:  perf record --call-graph lbr <command>" >&2
+        exit 1
+    fi
 }
 
 image_exists() {
@@ -90,7 +118,13 @@ case "$1" in
         # manually. FLAMEGRAPH_DIR is already exported in the image.
         docker_run /bin/bash "$@"
         ;;
+    clean)
+        ensure_image
+        docker_run make -f "${CONTAINER_MAKEFILE}" \
+            "FLAMEGRAPH_DIR=${CONTAINER_FLAMEGRAPH_DIR}" "$@"
+        ;;
     *)
+        ensure_perf_script
         ensure_image
         docker_run make -f "${CONTAINER_MAKEFILE}" \
             "FLAMEGRAPH_DIR=${CONTAINER_FLAMEGRAPH_DIR}" "$@"

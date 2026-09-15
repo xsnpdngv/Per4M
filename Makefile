@@ -9,7 +9,7 @@ CALLGRAPH_THEME_SKEW = 0.05    # skew the colorization curve,
                                # Values < 1.0 give more variety to lower percentages
                                # Values > 1.0 give less variety to lower percentages
 
-FLAMEGRAPH_DIR = $(HOME)/git/FlameGraph
+FLAMEGRAPH_DIR ?= $(HOME)/git/FlameGraph
 
 DATE = $(shell date +%Y-%m-%d)
 
@@ -61,18 +61,15 @@ $(DOC_PDF): $(SRC_MD)
 	pandoc $< $(PANDOC_OPTS) -o $@ 
 
 
-# === Perf script generation ===
-# Only create perf.script if it doesn't exist and perf.data is available
+# === Perf script ===
+# perf is not available here; $(PERF_SCRIPT) is produced on the host
+# (per4m.sh does this automatically from $(PERF_DATA)).
 $(PERF_SCRIPT):
-	@if [ -f $@ ]; then \
-		echo "✔ $@ already exists, skipping generation."; \
-	elif [ -f $(PERF_DATA) ]; then \
-		echo "🧩 Generating $@ from $(PERF_DATA)..."; \
-		perf script > $@; \
-	else \
-		echo "❌ Neither $@ nor $(PERF_DATA) exist. Cannot continue."; \
-		exit 1; \
-	fi
+	@echo "❌ $@ not found."; \
+	echo "   Record and convert on the host:"; \
+	echo "     perf record --call-graph lbr <command>"; \
+	echo "     perf script > $@"; \
+	exit 1
 
 $(PERF_SCRIPT_FLT): $(PERF_SCRIPT)
 	( sed 's/@plt//g' \

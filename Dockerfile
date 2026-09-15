@@ -1,12 +1,12 @@
 # Container image with everything the Per4M Makefile needs to turn a
-# pre-recorded perf.data / perf.script into callgraphs and flamegraphs.
+# host-generated perf.script into callgraphs and flamegraphs.
+#
+# perf itself is deliberately NOT installed: recording and `perf script`
+# happen on the host, where the kernel, symbols and debug info live.
 #
 # Base: debian:bookworm-slim
 #   - Small footprint (slim variant strips docs/locales) yet a full apt
 #     ecosystem, so we don't have to reach for source builds.
-#   - Ships `linux-perf`, a wrapper that transparently picks a matching
-#     perf binary; that's the one non-trivial dependency here and it is
-#     awkward to get on Alpine (musl) or on distroless images.
 #   - Stable/LTS-ish release cadence keeps rebuilds reproducible.
 FROM debian:bookworm-slim
 
@@ -18,7 +18,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-pip \
         graphviz \
-        linux-perf \
         ca-certificates \
         git \
         sed \

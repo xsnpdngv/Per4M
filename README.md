@@ -141,11 +141,19 @@ needed.
 
 ```bash
 perf record --call-graph lbr command
+perf script > perf.script
 NAME=my_program SUB=subtitle make
 # outputs:
 # $(NAME)_callgraph_YYYY-MM-DD.dot
 # $(NAME)_callgraph_YYYY-MM-DD.pdf
 # $(NAME)_flamegraph_YYYY-MM-DD.svg
+```
+
+With the Docker wrapper the `perf script` step is handled for you:
+
+```bash
+perf record --call-graph lbr command
+per4m.sh all NAME=my_program SUB=subtitle
 ```
 
 If `per4m`, `flamegraph` and `gprof2dot` are available elsewhere, make
@@ -164,8 +172,10 @@ make
 Makefile Targets and Variables
 ------------------------------
 
-The Makefile expects to find either `perf.data` or a pre-generated
-`perf.script` in the current directory. The intermediate
+The Makefile expects to find a `perf.script` in the current directory;
+it never invokes `perf` itself. Produce it on the machine that recorded
+the data (`perf script > perf.script`) — the [`per4m.sh`](per4m.sh)
+wrapper does this automatically from `perf.data`. The intermediate
 `perf.script.flt` filters out common noise (`@plt` stubs,
 `__libc_start_main`, `_start`, `main`).
 
@@ -194,18 +204,21 @@ Variables (override on the `make` command line or via the environment):
 Docker Wrapper
 ==============
 
-For hosts that don't have `perf`, `gprof2dot`, `graphviz` or FlameGraph
+For hosts that don't have `gprof2dot`, `graphviz` or FlameGraph
 installed — or for reproducibility — the repository ships a
 [`Dockerfile`](Dockerfile) and a driver script
 [`per4m.sh`](per4m.sh) that bundle everything into a throwaway
 container.
+
+The split is deliberate: `perf` runs on the **host**, where the kernel,
+the binaries and their debug symbols live; the container only does the
+visualization.
 
 What is in the image
 --------------------
 
 Based on `debian:bookworm-slim`, the image includes:
 
-- `linux-perf` — reads/decodes `perf.data` (`perf script`).
 - `gprof2dot`, `graphviz` (`dot`), `perl` — turn `perf.script` into
   callgraphs.
 - A shallow clone of
@@ -222,8 +235,9 @@ Requirements on the host
 ------------------------
 
 - Docker (or a compatible engine exposing the `docker` CLI).
-- The kernel version does not have to match the host that recorded
-  `perf.data` — `perf script` only decodes the file.
+- `perf`, for recording and for converting `perf.data` to `perf.script`.
+  It is **not** installed in the image. If you already have a
+  `perf.script` (e.g. copied from another machine), `perf` is not needed.
 
 Building the image
 ------------------
@@ -238,12 +252,14 @@ The tag defaults to `per4m:latest`; override with `PER4M_IMAGE=my/tag`.
 Running the pipeline
 --------------------
 
-`per4m.sh` mounts the current directory into `/work` inside a
-disposable (`--rm`) container and forwards its arguments to `make`
-against the baked-in Makefile. Files are written back to the host under
-your own UID/GID, so nothing ends up root-owned.
+`per4m.sh` first runs `perf script` on the host whenever `perf.data` is
+newer than `perf.script`, then mounts the current directory into `/work`
+inside a disposable (`--rm`) container and forwards its arguments to
+`make` against the baked-in Makefile. Files are written back to the host
+under your own UID/GID, so nothing ends up root-owned.
 
 ```bash
+perf record --call-graph lbr my_program
 cd /path/with/perf.data          # or perf.script
 /path/to/Per4M/per4m.sh all NAME=my_program SUB="run 1"
 /path/to/Per4M/per4m.sh cg  NAME=my_program
@@ -258,14 +274,14 @@ on `PATH` is convenient.
 Interactive shell
 -----------------
 
-To poke around manually (browse `perf.data`, inspect intermediates,
-run individual pipeline stages):
+To poke around manually (inspect intermediates, run individual pipeline
+stages):
 
 ```bash
 ./per4m.sh shell
 # inside the container:
 make -f /opt/per4m/Makefile cg NAME=my_program
-perf script | less
+less perf.script
 ```
 
 The container is removed as soon as you `exit`.
@@ -283,5 +299,7 @@ Commands:
 
 Environment:
   PER4M_IMAGE        Override docker image tag (default: per4m:latest).
+  PERF_DATA          Perf recording to convert (default: perf.data).
+  PERF_SCRIPT        Text dump handed to the container (default: perf.script).
 ```
 
